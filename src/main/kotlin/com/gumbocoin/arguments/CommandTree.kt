@@ -1,8 +1,12 @@
 package com.gumbocoin.arguments
 
+import com.gumbocoin.logging.Logger
 import java.lang.RuntimeException
 import java.lang.StringBuilder
 import kotlin.system.exitProcess
+
+
+val logger = Logger("command tree")
 
 class Command(val names :List<String>,
               val intro :String,
@@ -11,9 +15,15 @@ class Command(val names :List<String>,
               private val subcommands :List<Command>,
               val flags :List<BooleanFlag>,
               val values :List<ValueFlag>,
-              val runner :(ParsedValues) -> Unit,
-              val subrunner :((ParsedValues) -> Unit)? // this runs before subcommands and this run
+              val floatingNames: List<FloatingValue>,
+              val runner :ParsedValues.() -> Unit,
+              val subrunner :(ParsedValues.() -> Unit)?// this runs before subcommands and this run
 ){
+    var parent :Command? = null
+
+
+    fun parse(str :String) = parse(str.split(" ").toTypedArray())
+
     fun parse(args :Array<String>): ParsedValues{
         try {
             return parseInternal(args.asList())
@@ -25,10 +35,25 @@ class Command(val names :List<String>,
     }
 
 
-    private fun parseInternal(args :List<String>) :ParsedValues {
 
+
+    val logger :Logger by lazy {
+        val str = StringBuilder()
+        var me :Command? = this
+        while (me != null){
+            str.insert(0,me.names.first() + " ")
+            me = me.parent
+        }
+        Logger(str.toString().trim())
+    }
+    private fun parseInternal(args :List<String>) :ParsedValues {
+        if (args.filter { it.isNotBlank() }.isEmpty()){
+            return ParsedValues(emptyList(), emptyList(),listOf(this), emptyMap())
+        }
         val booleanValues = mutableListOf<BooleanValue>()
         val stringValues = mutableListOf<StringValue>()
+        val floating = mutableListOf<String>()
+
 
 
         var index = 0
@@ -75,19 +100,28 @@ class Command(val names :List<String>,
                 }
                 index++
             } else {
-                val nextCommand = subcommands.firstOrNull { it.names.contains(str) } ?: parseError("can't find command $str")
-                val subArray = args.subList(index + 1,args.size)
-                val parsed = try {
-                    nextCommand.parseInternal(subArray)
-                }catch (e :ShowHelpException){
-                    e.registerCommand(this)
-                    throw e
+                val nextCommand = subcommands.firstOrNull { it.names.contains(str) }
+                if (nextCommand == null && floatingNames.size == floating.size){
+                    parseError("can't find command \"$nextCommand\"")
+                } else if (nextCommand != null) {
+                    val subArray = args.subList(index + 1,args.size)
+                    val parsed = try {
+                        nextCommand.parseInternal(subArray)
+                    }catch (e :ShowHelpException){
+                        e.registerCommand(this)
+                        throw e
+                    }
+                    // we need to be first because this is the end of the chain
+                    return ParsedValues(booleanValues,stringValues, listOf(this),floating.mapIndexed { i, s -> floatingNames[i].name to s }.toMap()).concat(parsed)
+                } else {
+                    //it's a floating value
+                    floating.add(str)
+                    index ++
                 }
-                return ParsedValues(booleanValues,stringValues, listOf(this)).concat(parsed)
-                // we need to be first because this is the end of the chain
+
             }
         }
-        return ParsedValues(booleanValues,stringValues, listOf(this))
+        return ParsedValues(booleanValues,stringValues, listOf(this),floating.mapIndexed { i, s -> floatingNames[i].name to s }.toMap())
 
 
     }
@@ -104,35 +138,52 @@ class Command(val names :List<String>,
                 s += "Usage: "
                 commands.reverse()
                 for (command in commands){
-                    s += """${command.names.first()} [${command.names.first().toUpperCase()} OPTIONS] """
+                    val options = command.values.isNotEmpty() || command.flags.isNotEmpty()
+                    s += command.names.first() + if (options) """ [${command.names.first().toUpperCase()} OPTIONS] """ else " "
+                }
+                for (floating in floatingNames){
+                    s += """[${floating.name}] """
                 }
                 s += "\n"
                 s += commands.first().intro
                 s += "\n"
                 for (command in commands){
-                    s += "\n[${command.names.first().toUpperCase()} OPTIONS]\n"
-                    for (valueFlag in command.values){
-                        s +=
-                            (if(valueFlag.short != null){ "    -" + valueFlag.short  + " (${valueFlag.argumentName}) " } else {""}).padEnd(15) +
-                                ("  --" + valueFlag.long + " (${valueFlag.argumentName}) ").padEnd(20) +
-                                valueFlag.help + "\n"
+                    if (command.values.isNotEmpty() || command.flags.isNotEmpty() || (command == this@Command && command.floatingNames.isNotEmpty())) {
+                        s += "\n[${command.names.first().toUpperCase()} OPTIONS]\n"
+                        for (valueFlag in command.values) {
+                            s +=
+                                (if (valueFlag.short != null) {
+                                    "    -" + valueFlag.short + " (${valueFlag.argumentName}) "
+                                } else {
+                                    ""
+                                }).padEnd(15) +
+                                        ("  --" + valueFlag.long + " (${valueFlag.argumentName}) ").padEnd(20) +
+                                        valueFlag.help + "\n"
+                        }
+                        for (bool in command.flags) {
+                            s += (if (bool.short != null) {
+                                "    -" + bool.short
+                            } else {
+                                ""
+                            }).padEnd(15) +
+                                    ("  --" + bool.long).padEnd(20) +
+                                    bool.help + "\n"
+                        }
                     }
-                    for (bool in command.flags) {
-                        s += (if(bool.short != null){"    -" + bool.short} else {""}).padEnd(15) +
-                                ("  --" + bool.long).padEnd(20) +
-                                bool.help + "\n"
+                    if(this@Command == command){
+                        for(float in floatingNames){
+                            s += "    [${float.name}]".padEnd(15) + "".padEnd(20) + float.help + "\n"
+                        }
                     }
                 }
-
-                s += "\nSubcommands:\n"
-                for (sub in subcommands){
-                    s += "    " + (sub.names.first() + "  ").padEnd(15) + sub.desc + '\n'
+                if (subcommands.isNotEmpty()) {
+                    s += "\nSubcommands:\n"
+                    for (sub in subcommands) {
+                        s += "    " + (sub.names.first() + "  ").padEnd(15) + sub.desc + '\n'
+                    }
                 }
-
-
                 s += commands.last().outro
                 s += "\n"
-
                 return s
             }
     }
@@ -145,29 +196,39 @@ class Command(val names :List<String>,
     }
 }
 
-class ParseException(s: String):RuntimeException(s)
-
 class ParsedValues(
     private val booleanFields: List<BooleanValue>,
     private val stringFields: List<StringValue>,
-    private val commandTree :List<Command>){
+    private val commandTree :List<Command>,
+    val floatingValues: Map<String,String>){
+
+    val logger :Logger
+        get() = commandTree.last().logger
+
+    private val internalLogger = Logger.forObject(this)
+
 
     fun concat(other: ParsedValues): ParsedValues{
         return ParsedValues(
             booleanFields = booleanFields.plus(other.booleanFields),
             stringFields = stringFields.plus(other.stringFields),
-            commandTree = commandTree.plus(other.commandTree))
+            commandTree = commandTree.plus(other.commandTree),
+            floatingValues = floatingValues.plus(other.floatingValues))
     }
 
     fun execute(){
         for (command in commandTree){
-            command.subrunner?.invoke(this)
+            command.subrunner?.let {
+                internalLogger.verbose("running subrunner for command ${command.names.first()}")
+                it(this)
+            }
         }
+        internalLogger.verbose("running runner for command ${commandTree.last().names.first()}")
         commandTree.last().runner.invoke(this)
     }
 
     fun getBoolean(name :String):Boolean{
-        return booleanFields.first { it.name == name }.value
+        return booleanFields.firstOrNull { it.name == name }?.value ?: false
     }
 
     fun getString(name :String):String {
@@ -184,6 +245,8 @@ class StringValue(val name: String,val value: String)
 sealed class Flag(val short: Char?,val long: String, val help: String)
 class BooleanFlag(short: Char?,long: String,help: String):Flag(short,long, help)
 class ValueFlag(short: Char?,long: String,help: String, val argumentName: String):Flag(short,long, help)
+
+class FloatingValue(val name :String, val help :String)
 
 fun command(block: CommandBuilder.() -> Unit):Command{
     return CommandBuilder().apply(block).build()
@@ -202,6 +265,12 @@ class CommandBuilder{
         commands += CommandBuilder().apply(block).build()
     }
 
+    var subCommand :Command
+        get() = error("no")
+        set(value) {
+            commands.add(value)
+        }
+
 
     private val booleanFlags = mutableListOf<BooleanFlag>()
     fun flag(short: Char? = null,long: String,help: String){
@@ -213,29 +282,45 @@ class CommandBuilder{
         values.add(ValueFlag(short,long,help,argumentName))
     }
 
-    private var runner :((ParsedValues) -> Unit)? = null
-    fun runner(block: (ParsedValues) -> Unit){
+    private var runner :(ParsedValues.() -> Unit)? = null
+    fun runner(block: ParsedValues.() -> Unit){
         runner = block
     }
 
-    private var subrunner: ((ParsedValues) -> Unit)? = null
-    fun subrunner(block: (ParsedValues) -> Unit){
+    private var subrunner: (ParsedValues.() -> Unit)? = null
+    fun subrunner(block: ParsedValues.() -> Unit){
         subrunner = block
+    }
+
+    private val floatings = mutableListOf<FloatingValue>()
+    fun floating(name: String,help :String){
+        floatings.add(FloatingValue(name,help))
     }
 
     var intro: String = ""
     var outro: String = ""
     var desc: String = ""
     internal fun build():Command{
-        return Command(
-            names,
-            intro,
-            outro,
-            desc,
-            commands,
-            booleanFlags,
-            values,
-            runner!!,
-            subrunner)
+
+        if (commands.size > 0 && floatings.size > 0){
+            error("can't have both floating values and subcommands")
+        }
+
+        val c =  Command(
+            names = names,
+            intro = intro,
+            outro = outro,
+            desc = desc,
+            subcommands = commands,
+            flags = booleanFlags,
+            values = values,
+            floatingNames = floatings,
+            runner = runner!!,
+            subrunner = subrunner
+        )
+        for(sub in commands){
+            sub.parent = c
+        }
+        return c
     }
 }
