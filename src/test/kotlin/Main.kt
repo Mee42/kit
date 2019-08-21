@@ -16,7 +16,7 @@ fun helloWorld(){
 
     val b = """
 fun helloWorld(){
-    println("Hello World")
+    println("Hello, World!")
 }
     """.trimIndent()
 
