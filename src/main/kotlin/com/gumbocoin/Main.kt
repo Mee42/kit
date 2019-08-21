@@ -28,7 +28,6 @@ val command = command {
         logger.out("for more information, run kit --help")
     }
     subCommand = diff
-
 }
 
 
@@ -36,6 +35,6 @@ val command = command {
 // TODO
 //   config file
 
-fun main() {
-    command.parse("diff --help").execute()
+fun main(args: Array<String>) {
+    command.parse(args).execute()
 }

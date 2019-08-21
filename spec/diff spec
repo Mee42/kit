@@ -1,0 +1,21 @@
+diff files are arranged in a nested contextual format.
+There are different `scopes` that the text passes though.
+diff files start in `project scope`
+
+to enter file scope, use the keyword `enter file (FILE)`
+to exit file scope, use the keyword `pop`.
+anything after the keyword is ignored,
+so the type of scope being exited should be specified, ie `pop file`.
+
+the idea with git is that there is a pipeline, `a -> b` which is described by a diff, so that with just the diff and `a`
+a program can construct `b`
+
+you can start a edit-chunk by typing `LINE (LINE-NUMBER)`.
+This is followed by zero or more lines starting with `-`,
+and then zero or more lines starting with `+`
+
+The line number should be the number of the first erased line (zero indexed).
+The idea is that the `+` replaces the `-`.
+
+you exit the line mode by having a line that does not start with a + or a -.
+You can then add more LINE fields or pop the file scope.

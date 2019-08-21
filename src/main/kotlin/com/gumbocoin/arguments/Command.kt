@@ -19,7 +19,9 @@ class Command(val names :List<String>,
     var parent : Command? = null
 
 
-    fun parse(str :String) = parse(str.split(" ").toTypedArray())
+    fun parse(str :String) = parse(
+        str.split(" ").filter { it.isNotBlank() }.map { it.trim() }
+        .toTypedArray())
 
     fun parse(args :Array<String>): ParsedValues {
         try {
@@ -99,7 +101,7 @@ class Command(val names :List<String>,
             } else {
                 val nextCommand = subcommands.firstOrNull { it.names.contains(str) }
                 if (nextCommand == null && floatingNames.size == floating.size){
-                    parseError("can't find command \"$nextCommand\"")
+                    parseError("can't find command \"$str\"")
                 } else if (nextCommand != null) {
                     val subArray = args.subList(index + 1,args.size)
                     val parsed = try {

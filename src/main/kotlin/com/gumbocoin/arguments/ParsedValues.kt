@@ -6,7 +6,7 @@ class ParsedValues(
     private val booleanFields: List<BooleanValue>,
     private val stringFields: List<StringValue>,
     private val commandTree :List<Command>,
-    val floatingValues: Map<String,String>){
+    private val floatingValues: Map<String,String>){
 
     val logger : Logger
         get() = commandTree.last().logger
@@ -43,5 +43,12 @@ class ParsedValues(
     }
     fun getStringOrNull(name: String):String? {
         return stringFields.firstOrNull { it.name == name }?.value
+    }
+
+    fun getFloatingOrNull(name: String):String? {
+        return floatingValues[name]
+    }
+    fun getRequiredFloating(name: String):String{
+        return floatingValues[name] ?: logger.crashWith("Can't find argument [$name] required for this command")
     }
 }

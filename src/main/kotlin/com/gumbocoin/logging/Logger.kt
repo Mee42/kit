@@ -45,7 +45,7 @@ class Logger (private val name: String) {
         }
     }
 
-    fun crashWith(str: String,throwable: Throwable? = null, exitCode: Int = 1){
+    fun crashWith(str: String,throwable: Throwable? = null, exitCode: Int = 1) :Nothing{
         error(str,throwable)
         exitProcess(exitCode)
     }
